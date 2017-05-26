@@ -30,24 +30,58 @@
 """
 
 
+
+#import cookielib    # used for attachment upload
+#import cStringIO    # used for attachment upload
+#import mimetools    # used for attachment upload
+#import stat         # used for attachment upload
+#import shutil       # used for attachment download
+#import urllib2      # used for image upload
+
+from .lib.sgtimezone import SgTimezone
+try:
+    from xmlrpclib import Error, ProtocolError, ResponseError
+except ImportError:
+    from xmlrpc.client import Error, ProtocolError, ResponseError
+
+import mimetypes
+
 import base64
-import cookielib    # used for attachment upload
-import cStringIO    # used for attachment upload
+
 import datetime
 import logging
-import mimetools    # used for attachment upload
+
 import os
 import re
 import copy
-import stat         # used for attachment upload
+
 import sys
+import json
 import time
 import types
 import urllib
-import urllib2      # used for image upload
-import urlparse
-import shutil       # used for attachment download
+import requests
+import traceback
+import six
 
+try:
+    import urlparse
+    import urllib
+    urlparse.quote = urllib.quote
+    urlparse.splituser = urllib.splituser
+except ImportError:
+    import urllib.parse as urlparse
+
+def to_unicode(value):
+    return value.decode("utf-8")
+
+if sys.version_info[0] >= 3:
+    class unicode: pass
+    basestring = str
+    def to_unicode(value):
+        return str(value)
+
+'''
 # use relative import for versions >=2.5 and package import for python versions <2.5
 if (sys.version_info[0] > 2) or (sys.version_info[0] == 2 and sys.version_info[1] >= 6):
     from sg_26 import *
@@ -55,6 +89,7 @@ elif (sys.version_info[0] > 2) or (sys.version_info[0] == 2 and sys.version_info
     from sg_25 import *
 else:
     from sg_24 import *
+'''
 
 # mimetypes imported in version specific imports
 mimetypes.add_type('video/webm','.webm') # webm and mp4 seem to be missing
@@ -83,7 +118,7 @@ not require the added security provided by enforcing this.
 """
 try:
     import ssl        
-except ImportError, e:
+except ImportError as e:
     if "SHOTGUN_FORCE_CERTIFICATE_VALIDATION" in os.environ:
         raise ImportError("%s. SHOTGUN_FORCE_CERTIFICATE_VALIDATION environment variable prevents "
                           "disabling SSL certificate validation." % e)
@@ -302,6 +337,7 @@ class ClientCapabilities(object):
             "py_verison %s, ssl version %s" % (self.platform, self.local_path_field,
             self.py_version, self.ssl_version)
 
+
 class _Config(object):
     """
     Container for the client configuration.
@@ -346,7 +382,6 @@ class _Config(object):
         self.session_token = None
         self.authorization = None
         self.no_ssl_validation = False
-
 
 class Shotgun(object):
     """
@@ -494,7 +529,7 @@ class Shotgun(object):
         if len([x for x in [session_token, script_name, api_key, login, password] if x]) == 0:
             if connect:
                 raise ValueError("must provide login/password, session_token or script_name/api_key")
-
+        
         self.config = _Config()
         self.config.api_key = api_key
         self.config.script_name = script_name
@@ -506,6 +541,7 @@ class Shotgun(object):
         self.config.convert_datetimes_to_utc = convert_datetimes_to_utc
         self.config.no_ssl_validation = NO_SSL_VALIDATION
         self.config.raw_http_proxy = http_proxy
+        
         self._connection = None
         if ca_certs is not None:
             self.__ca_certs = ca_certs
@@ -520,46 +556,16 @@ class Shotgun(object):
                 self.base_url)
         self.config.api_path = urlparse.urljoin(urlparse.urljoin(
             api_base or "/", self.config.api_ver + "/"), "json")
-
-
+        
+        
         # if the service contains user information strip it out
         # copied from the xmlrpclib which turned the user:password into
         # and auth header
-        auth, self.config.server = urllib.splituser(urlparse.urlsplit(base_url).netloc)
+        auth, self.config.server = urlparse.splituser(urlparse.urlsplit(base_url).netloc)
         if auth:
-            auth = base64.encodestring(urllib.unquote(auth))
+            auth = base64.encodestring(urlparse.unquote(auth).encode()).decode()
             self.config.authorization = "Basic " + auth.strip()
-
-        # foo:bar@123.456.789.012:3456
-        if http_proxy:
-            # check if we're using authentication. Start from the end since there might be
-            # @ in the user's password.
-            p = http_proxy.rsplit("@", 1)
-            if len(p) > 1:
-                self.config.proxy_user, self.config.proxy_pass = \
-                    p[0].split(":", 1)
-                proxy_server = p[1]
-            else:
-                proxy_server = http_proxy
-            proxy_netloc_list = proxy_server.split(":", 1)
-            self.config.proxy_server = proxy_netloc_list[0]
-            if len(proxy_netloc_list) > 1:
-                try:
-                    self.config.proxy_port = int(proxy_netloc_list[1])
-                except ValueError:
-                    raise ValueError("Invalid http_proxy address '%s'. Valid " \
-                        "format is '123.456.789.012' or '123.456.789.012:3456'"\
-                        ". If no port is specified, a default of %d will be "\
-                        "used." % (http_proxy, self.config.proxy_port))
-
-            # now populate self.config.proxy_handler
-            if self.config.proxy_user and self.config.proxy_pass:
-                auth_string = "%s:%s@" % (self.config.proxy_user, self.config.proxy_pass)
-            else:
-                auth_string = ""
-            proxy_addr = "http://%s%s:%d" % (auth_string, self.config.proxy_server, self.config.proxy_port)
-            self.config.proxy_handler = urllib2.ProxyHandler({self.config.scheme : proxy_addr})
-
+        
         if ensure_ascii:
             self._json_loads = self._json_loads_ascii
 
@@ -572,14 +578,6 @@ class Shotgun(object):
         # call to server will only be made once and will raise error
         if connect:
             self.server_caps
-
-        # When using auth_token in a 2FA scenario we need to switch to session-based
-        # authentication because the auth token will no longer be valid after a first use.
-        if self.config.auth_token is not None:
-            self.config.session_token = self.get_session_token()
-            self.config.user_login = None
-            self.config.user_password = None
-            self.config.auth_token = None
 
 
     # ========================================================================
@@ -1890,7 +1888,7 @@ class Shotgun(object):
             "field_name" : field_name,
             "properties": [
                 {"property_name" : k, "value" : v}
-                for k, v in (properties or {}).iteritems()
+                for k, v in (properties or {}).items()
             ]
         }
 
@@ -1944,8 +1942,8 @@ class Shotgun(object):
 
         # create ssl validation string based on settings
         validation_str = "validate"
-        if self.config.no_ssl_validation:
-            validation_str = "no-validate"
+        #if self.config.no_ssl_validation:
+        #    validation_str = "no-validate"
         
         self._user_agents = ["shotgun-json (%s)" % __version__,
                              "Python %s (%s)" % (self.client_caps.py_version, ua_platform),
@@ -2418,7 +2416,7 @@ class Shotgun(object):
         if file_path:
             try:
                 fp = open(file_path, 'wb')
-            except IOError, e:
+            except IOError as e:
                 raise IOError("Unable to write Attachment to disk using "\
                               "file_path. %s" % e) 
 
@@ -2431,18 +2429,21 @@ class Shotgun(object):
             self.set_up_auth_cookie()
    
         try:
-            request = urllib2.Request(url)
-            request.add_header('user-agent', "; ".join(self._user_agents))
-            req = urllib2.urlopen(request)
+            conn = self._get_connection()
+            print(url.replace('http://', 'https://'))
+            headers = {'user-agent': "; ".join(self._user_agents)}
+            r =  conn.get(url.replace('http://', 'https://'), stream=True, headers=headers) # TODO remove replace
             if file_path:
-                shutil.copyfileobj(req, fp)
+                with open(file_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=1024):
+                        if not chunk:
+                            break
+                        f.write(chunk)
             else:
-                attachment = req.read()
+                attachment = r.content
         # 400 [sg] Attachment id doesn't exist or is a local file
         # 403 [s3] link is invalid
-        except urllib2.URLError, e:
-            if file_path:
-                fp.close()
+        except Exception as e:
             err = "Failed to open %s\n%s" % (url, e)
             if hasattr(e, 'code'):
                 if e.code == 400:
@@ -2462,8 +2463,6 @@ class Shotgun(object):
             raise ShotgunFileDownloadError(err)
         else:
             if file_path:
-                if not fp.closed:
-                    fp.close()
                 return file_path
             else:
                 return attachment
@@ -2476,14 +2475,18 @@ class Shotgun(object):
         used internally for downloading attachments from the Shotgun server.
         """
         sid = self.get_session_token()
-        cj = cookielib.LWPCookieJar()
-        c = cookielib.Cookie('0', '_session_id', sid, None, False,
-            self.config.server, False, False, "/", True, False, None, True,
-            None, None, {})
-        cj.set_cookie(c)
-        cookie_handler = urllib2.HTTPCookieProcessor(cj)
-        opener = self._build_opener(cookie_handler)
-        urllib2.install_opener(opener)
+        conn = self._get_connection()
+        conn.cookies.set('_session_id', sid, domain=self.config.server, path="/")
+        #cj = cookielib.LWPCookieJar()
+        #                      vers  name         value port  port_specified
+        #c = cookielib.Cookie('0', '_session_id', sid, None, False,
+        #     domain             dom s         path
+        #    self.config.server, False, False, "/", True, False, None, True,
+        #    None, None, {})
+        #cj.set_cookie(c)
+        #cookie_handler = urllib2.HTTPCookieProcessor(cj)
+        #opener = self._build_opener(cookie_handler)
+        #urllib2.install_opener(opener)
 
     def get_attachment_download_url(self, attachment):
         """
@@ -2767,7 +2770,7 @@ class Shotgun(object):
             raise ValueError("entity_types parameter must be a dictionary")
         
         api_entity_types = {}
-        for (entity_type, filter_list) in entity_types.iteritems():
+        for (entity_type, filter_list) in entity_types.items():
 
             if isinstance(filter_list, (list, tuple)):
                 resolved_filters = _translate_filters(filter_list, filter_operator=None)
@@ -3005,7 +3008,8 @@ class Shotgun(object):
 
         LOG.debug("Starting rpc call to %s with params %s" % (
             method, params))
-
+        
+        
         params = self._transform_outbound(params)
         payload = self._build_payload(method, params,
             include_auth_params=include_auth_params)
@@ -3020,7 +3024,7 @@ class Shotgun(object):
         LOG.debug("Completed rpc call to %s" % (method))
         try:
             self._parse_http_status(http_status)
-        except ProtocolError, e:
+        except ProtocolError as e:
             e.headers = resp_headers
             # 403 is returned with custom error page when api access is blocked
             if e.errcode == 403:
@@ -3130,9 +3134,8 @@ class Shotgun(object):
         requires it. The unicode string is then encoded as 'utf-8' as it must
         be in a single byte encoding to go over the wire.
         """
-
         wire = json.dumps(payload, ensure_ascii=False)
-        if isinstance(wire, unicode):
+        if sys.version_info[0] < 3 and isinstance(wire, unicode):
             return wire.encode("utf-8")
         return wire
 
@@ -3158,7 +3161,7 @@ class Shotgun(object):
             attempt += 1
             try:
                 return self._http_request(verb, path, body, req_headers)
-            except SSLHandshakeError, e:
+            except requests.exceptions.SSLError as e:
                 # Test whether the exception is due to the fact that this is an older version of
                 # Python that cannot validate certificates encrypted with SHA-2. If it is, then 
                 # fall back on disabling the certificate validation and try again - unless the
@@ -3207,16 +3210,17 @@ class Shotgun(object):
         LOG.debug("Request body is %s" % body)
 
         conn = self._get_connection()
-        resp, content = conn.request(url, method=verb, body=body,
+        resp = conn.request(verb, url, data=body,
             headers=headers)
         #http response code is handled else where
-        http_status = (resp.status, resp.reason)
+        
+        http_status = (resp.status_code, resp.reason)
         resp_headers = dict(
             (k.lower(), v)
-            for k, v in resp.iteritems()
+            for k, v in resp.headers.items()
         )
-        resp_body = content
-
+        resp_body = resp.text
+        
         LOG.debug("Response status is %s %s" % http_status)
         LOG.debug("Response headers are %s" % resp_headers)
         LOG.debug("Response body is %s" % resp_body)
@@ -3285,7 +3289,7 @@ class Shotgun(object):
 
         def _decode_dict(dct):
             newdict = {}
-            for k, v in dct.iteritems():
+            for k, v in dct.items():
                 if isinstance(k, unicode):
                     k = k.encode('utf-8')
                 if isinstance(v, unicode):
@@ -3303,10 +3307,8 @@ class Shotgun(object):
 
         :raises ShotgunError: If the server response contains an exception.
         """
-
         ERR_AUTH = 102 # error code for authentication related problems
         ERR_2FA  = 106 # error code when 2FA authentication is required but no 2FA token provided.
-
         if isinstance(sg_response, dict) and sg_response.get("exception"):
             if sg_response.get("error_code") == ERR_AUTH:
                 raise AuthenticationFault(sg_response.get("message", "Unknown Authentication Error"))
@@ -3335,7 +3337,7 @@ class Shotgun(object):
         if isinstance(data, dict):
             return dict(
                 (k, recursive(v, visitor))
-                for k, v in data.iteritems()
+                for k, v in data.items()
             )
 
         return visitor(data)
@@ -3380,7 +3382,8 @@ class Shotgun(object):
 
             if isinstance(value, str):
                 # Convert strings to unicode
-                return value.decode("utf-8")
+                
+                return to_unicode(value)
 
             return value
 
@@ -3425,6 +3428,9 @@ class Shotgun(object):
         """
         if self._connection is not None:
             return self._connection
+        
+        self._connection = requests.Session()
+        return self._connection
 
         if self.config.proxy_server:
             pi = ProxyInfo(socks.PROXY_TYPE_HTTP, self.config.proxy_server,
@@ -3444,13 +3450,7 @@ class Shotgun(object):
         """
         if self._connection is None:
             return
-
-        for conn in self._connection.connections.values():
-            try:
-                conn.close()
-            except Exception:
-                pass
-        self._connection.connections.clear()
+        del self._connection
         self._connection = None
         return
     # ========================================================================
@@ -3482,12 +3482,12 @@ class Shotgun(object):
                 continue
 
             # iterate over each item and check each field for possible injection
-            for k, v in rec.iteritems():
+            for k, v in rec.items():
                 if not v:
                     continue
 
                 # Check for html entities in strings
-                if isinstance(v, types.StringTypes):
+                if isinstance(v, six.string_types):
                     rec[k] = rec[k].replace('&lt;', '<')
 
                 # check for thumbnail for older version (<3.3.0) of shotgun
@@ -3520,8 +3520,8 @@ class Shotgun(object):
         # curl "https://foo.com/upload/get_thumbnail_url?entity_type=Version&entity_id=1"
         # 1
         # /files/0000/0000/0012/232/shot_thumb.jpg.jpg
-        entity_info = {'e_type':urllib.quote(entity_type),
-                       'e_id':urllib.quote(str(entity_id))}
+        entity_info = {'e_type':urlparse.quote(entity_type),
+                       'e_id':urlparse.quote(str(entity_id))}
         url = ("/upload/get_thumbnail_url?" +
                 "entity_type=%(e_type)s&entity_id=%(e_id)s" % entity_info)
 
@@ -3552,7 +3552,7 @@ class Shotgun(object):
         [{'field_name': 'foo', 'value': 'bar', 'thing1': 'value1'}]
         """
         ret = []
-        for k, v in (d or {}).iteritems():
+        for k, v in (d or {}).items():
             d = {key_name: k, value_name: v}
             d.update((extra_data or {}).get(k, {}))
             ret.append(d)
@@ -3565,7 +3565,7 @@ class Shotgun(object):
 
         e.g. d {'foo' : 'bar'} changed to {'foo': {"value": 'bar'}]
         """
-        return dict([(k, {key_name: v}) for (k,v) in (d or {}).iteritems()])
+        return dict([(k, {key_name: v}) for (k,v) in (d or {}).items()])
 
     def _upload_file_to_storage(self, path, storage_url):
         """
@@ -3671,7 +3671,7 @@ class Shotgun(object):
             request.get_method = lambda: "PUT"
             result = opener.open(request)
             etag = result.info().getheader("ETag")
-        except urllib2.HTTPError, e:
+        except urllib2.HTTPError as e:
             if e.code == 500:
                 raise ShotgunError("Server encountered an internal error.\n%s\n%s\n\n" % (storage_url, e))
             else:
@@ -3717,78 +3717,33 @@ class Shotgun(object):
 
         params.update(self._auth_params())
         
-        opener = self._build_opener(FormPostHandler)
 
         # Perform the request
+        
+        conn = self._get_connection()
         try:
-            resp = opener.open(url, params)
-            result = resp.read()
+            files = {}
+            _params = {}
+            for key, v in params.items():
+                if hasattr(v, 'read'):
+                    files[key] = v
+                else:
+                    _params[key] = v
+            print(url, _params, files)
+            resp = conn.post(url, data = _params, files=files)
+            result = resp.text
+            print(dir(resp))
+            print(resp)
+            print(result)
             # response headers are in str(resp.info()).splitlines()
-        except urllib2.HTTPError, e:
-            if e.code == 500:
-                raise ShotgunError("Server encountered an internal error. "
-                                   "\n%s\n(%s)\n%s\n\n" % (url, self._sanitize_auth_params(params), e))
-            else:
-                raise ShotgunError("Unanticipated error occurred %s" % (e))
+        except Exception as e:
+            raise ShotgunError("Unanticipated error occurred %s" % (e))
+        if resp.status_code == 500:
+            raise ShotgunError("Server encountered an internal error. "
+                               "\n%s\n(%s)\n%s\n\n" % (url, self._sanitize_auth_params(params), resp.reason))
 
         return result
 
-# Helpers from the previous API, left as is.
-
-# Based on http://code.activestate.com/recipes/146306/
-class FormPostHandler(urllib2.BaseHandler):
-    """
-    Handler for multipart form data
-    """
-    handler_order = urllib2.HTTPHandler.handler_order - 10 # needs to run first
-
-    def http_request(self, request):
-        data = request.get_data()
-        if data is not None and not isinstance(data, basestring):
-            files = []
-            params = []
-            for key, value in data.items():
-                if isinstance(value, file):
-                    files.append((key, value))
-                else:
-                    params.append((key, value))
-            if not files:
-                data = urllib.urlencode(params, True) # sequencing on
-            else:
-                boundary, data = self.encode(params, files)
-                content_type = 'multipart/form-data; boundary=%s' % boundary
-                request.add_unredirected_header('Content-Type', content_type)
-            request.add_data(data)
-        return request
-
-    def encode(self, params, files, boundary=None, buffer=None):
-        if boundary is None:
-            boundary = mimetools.choose_boundary()
-        if buffer is None:
-            buffer = cStringIO.StringIO()
-        for (key, value) in params:
-            buffer.write('--%s\r\n' % boundary)
-            buffer.write('Content-Disposition: form-data; name="%s"' % key)
-            buffer.write('\r\n\r\n%s\r\n' % value)
-        for (key, fd) in files:
-            filename = fd.name.split('/')[-1]
-            content_type = mimetypes.guess_type(filename)[0]
-            content_type = content_type or 'application/octet-stream'
-            file_size = os.fstat(fd.fileno())[stat.ST_SIZE]
-            buffer.write('--%s\r\n' % boundary)
-            c_dis = 'Content-Disposition: form-data; name="%s"; filename="%s"%s'
-            content_disposition = c_dis % (key, filename, '\r\n')
-            buffer.write(content_disposition)
-            buffer.write('Content-Type: %s\r\n' % content_type)
-            buffer.write('Content-Length: %s\r\n' % file_size)
-            fd.seek(0)
-            buffer.write('\r\n%s\r\n' % fd.read())
-        buffer.write('--%s--\r\n\r\n' % boundary)
-        buffer = buffer.getvalue()
-        return boundary, buffer
-
-    def https_request(self, request):
-        return self.http_request(request)
 
 
 def _translate_filters(filters, filter_operator):
