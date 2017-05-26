@@ -8,18 +8,26 @@ import datetime
 import sys
 import os
 import re
-from mock import patch, Mock, MagicMock
+from .mock import patch, Mock, MagicMock
 import time
 import uuid
 import unittest
-import urlparse
-import urllib2
 import warnings
 
-import shotgun_api3
-from shotgun_api3.lib.httplib2 import Http, SSLHandshakeError
+import requests
 
-import base
+try:
+    import urlparse
+    import urllib
+    urlparse.quote = urllib.quote
+    urlparse.splituser = urllib.splituser
+except ImportError:
+    import urllib.parse as urlparse
+
+import shotgun_api3
+#from shotgun_api3.lib.httplib2 import Http, SSLHandshakeError
+
+from . import base
 
 class TestShotgunApi(base.LiveTestBase):
     def setUp(self):
@@ -139,7 +147,7 @@ class TestShotgunApi(base.LiveTestBase):
         # upload / download only works against a live server because it does
         # not use the standard http interface
         if 'localhost' in self.server_url:
-            print "upload / down tests skipped for localhost"
+            print("upload / down tests skipped for localhost")
             return
 
         this_dir, _ = os.path.split(__file__)
@@ -230,11 +238,12 @@ class TestShotgunApi(base.LiveTestBase):
         self.assertEqual(new_version.get('type'), 'Version')
         self.assertEqual(new_version.get('project'), self.project)
         self.assertTrue(new_version.get('image') is not None)
-
-        h = Http(".cache")
-        thumb_resp, content = h.request(new_version.get('image'), "GET")
-        self.assertEqual(thumb_resp['status'], '200')
-        self.assertEqual(thumb_resp['content-type'], 'image/jpeg')
+ 
+        s = self.sg._get_connection()
+        resp = s.request("GET", new_version.get('image').replace('http', 'https')) # TODO remove the replace
+        content = resp.content
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers['content-type'], 'image/jpeg')
 
         self.sg.delete("Version", new_version['id'])
 
@@ -249,10 +258,11 @@ class TestShotgunApi(base.LiveTestBase):
         self.assertEqual(new_version.get('project'), self.project)
         self.assertTrue(new_version.get('filmstrip_image') is not None)
 
-        h = Http(".cache")
-        filmstrip_thumb_resp, content = h.request(new_version.get('filmstrip_image'), "GET")
-        self.assertEqual(filmstrip_thumb_resp['status'], '200')
-        self.assertEqual(filmstrip_thumb_resp['content-type'], 'image/jpeg')
+        s = self.sg._get_connection()
+        resp = s.request("GET", new_version.get('filmstrip_image').replace('http', 'https')) # TODO remove the replace
+        content = resp.content
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers['content-type'], 'image/jpeg')
 
         self.sg.delete("Version", new_version['id'])
     # end test_upload_thumbnail_in_create
@@ -277,11 +287,12 @@ class TestShotgunApi(base.LiveTestBase):
         self.assertEqual(version_with_thumbnail.get('type'), 'Version')
         self.assertEqual(version_with_thumbnail.get('id'), self.version['id'])
 
-
-        h = Http(".cache")
-        thumb_resp, content = h.request(version_with_thumbnail.get('image'), "GET")
-        self.assertEqual(thumb_resp['status'], '200')
-        self.assertEqual(thumb_resp['content-type'], 'image/jpeg')
+        
+        s = self.sg._get_connection()
+        resp = s.request("GET", version_with_thumbnail.get('image').replace('http', 'https')) # TODO remove the replace
+        content = resp.content
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers['content-type'], 'image/jpeg')
 
         # clear thumbnail
         response_clear_thumbnail = self.sg.update("Version",
@@ -309,10 +320,11 @@ class TestShotgunApi(base.LiveTestBase):
         self.assertEqual(task_with_thumbnail.get('type'), 'Task')
         self.assertEqual(task_with_thumbnail.get('id'), self.task['id'])
 
-        h = Http(".cache")
-        thumb_resp, content = h.request(task_with_thumbnail.get('image'), "GET")
-        self.assertEqual(thumb_resp['status'], '200')
-        self.assertEqual(thumb_resp['content-type'], 'image/jpeg')
+        s = self.sg._get_connection()
+        resp = s.request("GET", task_with_thumbnail.get('image').replace('http', 'https')) # TODO remove the replace
+        content = resp.content
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers['content-type'], 'image/jpeg')
 
         # clear thumbnail
         response_clear_thumbnail = self.sg.update("Version",
@@ -352,10 +364,11 @@ class TestShotgunApi(base.LiveTestBase):
             self.assertEqual(response_version_with_project[0].get('id'), self.version['id'])
             self.assertEqual(response_version_with_project[0].get('code'), 'Sg unittest version')
 
-            h = Http(".cache")
-            thumb_resp, content = h.request(response_version_with_project[0].get('project.Project.image'), "GET")
-            self.assertEqual(thumb_resp['status'], '200')
-            self.assertEqual(thumb_resp['content-type'], 'image/jpeg')
+            s = self.sg._get_connection()
+            resp = s.request("GET", response_version_with_project[0].get('project.Project.image').replace('http', 'https')) # TODO remove the replace
+            content = resp.content
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.headers['content-type'], 'image/jpeg')
 
         else:
             expected_version_with_project = [
@@ -919,11 +932,11 @@ class TestFind(base.LiveTestBase):
     def setUp(self):
         super(TestFind, self).setUp()
         # We will need the created_at field for the shot
-        fields = self.shot.keys()[:]
+        fields = list(self.shot.keys())[:]
         fields.append('created_at')
         self.shot = self.sg.find_one('Shot', [['id', 'is', self.shot['id']]], fields)
         # We will need the uuid field for our LocalStorage
-        fields = self.local_storage.keys()[:]
+        fields = list(self.local_storage.keys())[:]
         fields.append('uuid')
         self.local_storage = self.sg.find_one('LocalStorage', [['id', 'is', self.local_storage['id']]], fields)
 
@@ -1085,7 +1098,7 @@ class TestFind(base.LiveTestBase):
         Test that 'in' relation using commas (old format) works with duration fields.
         """
         # we need to get the duration value
-        new_task_keys = self.task.keys()[:]
+        new_task_keys = list(self.task.keys())[:]
         new_task_keys.append('duration')
         self.task = self.sg.find_one('Task',[['id', 'is', self.task['id']]], new_task_keys)
         filters = [['duration', 'in', self.task['duration']],
@@ -1099,7 +1112,7 @@ class TestFind(base.LiveTestBase):
         Test that 'in' relation using list (new format) works with duration fields.
         """
         # we need to get the duration value
-        new_task_keys = self.task.keys()[:]
+        new_task_keys = list(self.task.keys())[:]
         new_task_keys.append('duration')
         self.task = self.sg.find_one('Task',[['id', 'is', self.task['id']]], new_task_keys)
         filters = [['duration', 'in', [self.task['duration'],]],
@@ -1113,7 +1126,7 @@ class TestFind(base.LiveTestBase):
         Test that 'not_in' relation using commas (old format) works with duration fields.
         """
         # we need to get the duration value
-        new_task_keys = self.task.keys()[:]
+        new_task_keys = list(self.task.keys())[:]
         new_task_keys.append('duration')
         self.task = self.sg.find_one('Task',[['id', 'is', self.task['id']]], new_task_keys)
 
@@ -1418,7 +1431,7 @@ class TestFind(base.LiveTestBase):
         '''
         # Create a number field if it doesn't already exist
         num_field = 'sg_api_tests_number_field'
-        if num_field not in self.sg.schema_field_read('Asset').keys():
+        if num_field not in list(self.sg.schema_field_read('Asset').keys()):
             self.sg.schema_field_create('Asset', 'number', num_field.replace('sg_','').replace('_',' '))
 
         # Set to None
@@ -1581,18 +1594,23 @@ class TestErrors(base.TestBase):
         sg = shotgun_api3.Shotgun(server_url, login=login, password='not a real password')
         self.assertRaises(shotgun_api3.AuthenticationFault, sg.find_one, 'Shot',[])
 
-    @patch('shotgun_api3.shotgun.Http.request')
+    @patch('requests.Session.request')
     def test_status_not_200(self, mock_request):
         response = MagicMock(name="response mock", spec=dict)
-        response.status = 300
+        response.status_code = 300
         response.reason = 'reason'
-        mock_request.return_value = (response, {})
+        response.headers = {}
+        response.text = ""
+        mock_request.return_value = response
         self.assertRaises(shotgun_api3.ProtocolError, self.sg.find_one, 'Shot', [])
 
-    @patch('shotgun_api3.shotgun.Http.request')
+    @patch('requests.Session.request')
     def test_sha2_error(self, mock_request):
         # Simulate the SSLHandshakeError raised with SHA-2 errors
-        mock_request.side_effect = SSLHandshakeError("[Errno 1] _ssl.c:480: error:0D0C50A1:asn1 "
+        #mock_request.side_effect = SSLHandshakeError("[Errno 1] _ssl.c:480: error:0D0C50A1:asn1 "
+        #                            "encoding routines:ASN1_item_verify: unknown message digest "
+        #                            "algorithm")
+        mock_request.side_effect = requests.exceptions.SSLError("[Errno 1] _ssl.c:480: error:0D0C50A1:asn1 "
                                     "encoding routines:ASN1_item_verify: unknown message digest "
                                     "algorithm")
 
@@ -1617,7 +1635,7 @@ class TestErrors(base.TestBase):
 
         try:
             result = self.sg.info()
-        except SSLHandshakeError:
+        except requests.exceptions.SSLError:
             # ensure the api has reset the values in the correct fallback behavior
             self.assertTrue(self.sg.config.no_ssl_validation)
             self.assertTrue(shotgun_api3.shotgun.NO_SSL_VALIDATION)
@@ -1627,10 +1645,13 @@ class TestErrors(base.TestBase):
         if original_env_val is not None:
             os.environ["SHOTGUN_FORCE_CERTIFICATE_VALIDATION"] = original_env_val
 
-    @patch('shotgun_api3.shotgun.Http.request')
+    @patch('requests.Session.request')
     def test_sha2_error_with_strict(self, mock_request):
         # Simulate the SSLHandshakeError raised with SHA-2 errors
-        mock_request.side_effect = SSLHandshakeError("[Errno 1] _ssl.c:480: error:0D0C50A1:asn1 "
+        #mock_request.side_effect = SSLHandshakeError("[Errno 1] _ssl.c:480: error:0D0C50A1:asn1 "
+        #                           "encoding routines:ASN1_item_verify: unknown message digest "
+        #                            "algorithm")
+        mock_request.side_effect = requests.exceptions.SSLError("[Errno 1] _ssl.c:480: error:0D0C50A1:asn1 "
                                     "encoding routines:ASN1_item_verify: unknown message digest "
                                     "algorithm")
 
@@ -1645,7 +1666,7 @@ class TestErrors(base.TestBase):
 
         try:
             result = self.sg.info()
-        except SSLHandshakeError:
+        except requests.exceptions.SSLError:
             # ensure the api has NOT reset the values in the fallback behavior because we have
             # set the env variable to force validation
             self.assertFalse(self.sg.config.no_ssl_validation)
@@ -1656,10 +1677,17 @@ class TestErrors(base.TestBase):
         if original_env_val is not None:
             os.environ["SHOTGUN_FORCE_CERTIFICATE_VALIDATION"] = original_env_val
 
-    @patch.object(urllib2.OpenerDirector, 'open')
+    @patch('requests.Session.post')
     def test_sanitized_auth_params(self, mock_open):
         # Simulate the server blowing up and giving us a 500 error
-        mock_open.side_effect = urllib2.HTTPError('url', 500, 'message', {}, None)
+        
+        response = requests.Response()
+        response.status_code = 500
+        response._content = b'message'
+        response.url = 'url'
+        #mock_open.side_effect = urllib2.HTTPError('url', 500, 'message', {}, None)
+        mock_open.side_effect = requests.HTTPError(response=response)
+        #mock_open.return_value = response
 
         this_dir, _ = os.path.split(__file__)
         thumbnail_path = os.path.abspath(os.path.join(this_dir, "sg_logo.jpg"))
@@ -1667,7 +1695,7 @@ class TestErrors(base.TestBase):
         try:
             # Try to upload a bogus file
             self.sg.upload('Note', 1234, thumbnail_path)
-        except shotgun_api3.ShotgunError, e:
+        except shotgun_api3.ShotgunError as e:
             self.assertFalse(self.api_key in str(e))
             return
 
@@ -1756,8 +1784,9 @@ class TestHumanUserSudoAuth(base.TestBase):
         expected = "The user does not have permission to 'sudo':"
         try :
             x.find_one('Shot',[])
-        except shotgun_api3.Fault, e:
+        except shotgun_api3.Fault as e:
             # py24 exceptions don't have message attr
+            print(e)
             if hasattr(e, 'message'):
                 self.assert_(e.message.startswith(expected))
             else:
@@ -1810,10 +1839,11 @@ class TestHumanUserAuth(base.HumanUserAuthLiveTestBase):
         self.assertEqual(version_with_thumbnail.get('id'), self.version['id'])
 
 
-        h = Http(".cache")
-        thumb_resp, content = h.request(version_with_thumbnail.get('image'), "GET")
-        self.assertEqual(thumb_resp['status'], '200')
-        self.assertEqual(thumb_resp['content-type'], 'image/jpeg')
+        s = self.sg._get_connection()
+        resp = s.request("GET", version_with_thumbnail.get('image').replace('http', 'https')) # TODO remove the replace
+        content = resp.content
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers['content-type'], 'image/jpeg')
 
         # clear thumbnail
         response_clear_thumbnail = self.sg.update("Version",
@@ -1873,10 +1903,11 @@ class TestSessionTokenAuth(base.SessionTokenAuthLiveTestBase):
             self.assertEqual(version_with_thumbnail.get('id'), self.version['id'])
 
 
-            h = Http(".cache")
-            thumb_resp, content = h.request(version_with_thumbnail.get('image'), "GET")
-            self.assertEqual(thumb_resp['status'], '200')
-            self.assertEqual(thumb_resp['content-type'], 'image/jpeg')
+            s = self.sg._get_connection()
+            resp = s.request("GET", version_with_thumbnail.get('image').replace('http', 'https')) # TODO remove the replace
+            content = resp.content
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.headers['content-type'], 'image/jpeg')
 
             # clear thumbnail
             response_clear_thumbnail = self.sg.update("Version",
