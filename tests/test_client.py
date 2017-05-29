@@ -5,7 +5,7 @@ need a live server to run against."""
 import base64
 import datetime
 import re
-import six
+from shotgun_api3.lib import six
 try:
     import simplejson as json
 except ImportError:
@@ -14,7 +14,7 @@ except ImportError:
     except ImportError:
         import shotgun_api3.lib.simplejson as json
 
-import requests
+from shotgun_api3.lib import requests
 import platform
 import sys
 import time

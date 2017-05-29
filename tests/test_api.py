@@ -14,7 +14,7 @@ import uuid
 import unittest
 import warnings
 
-import requests
+from shotgun_api3.lib import requests
 
 try:
     import urlparse
@@ -240,7 +240,7 @@ class TestShotgunApi(base.LiveTestBase):
         self.assertTrue(new_version.get('image') is not None)
  
         s = self.sg._get_connection()
-        resp = s.request("GET", new_version.get('image').replace('http', 'https')) # TODO remove the replace
+        resp = s.request("GET", new_version.get('image').replace('http://', 'https://')) # TODO remove the replace
         content = resp.content
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.headers['content-type'], 'image/jpeg')
@@ -259,7 +259,7 @@ class TestShotgunApi(base.LiveTestBase):
         self.assertTrue(new_version.get('filmstrip_image') is not None)
 
         s = self.sg._get_connection()
-        resp = s.request("GET", new_version.get('filmstrip_image').replace('http', 'https')) # TODO remove the replace
+        resp = s.request("GET", new_version.get('filmstrip_image').replace('http://', 'https://')) # TODO remove the replace
         content = resp.content
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.headers['content-type'], 'image/jpeg')
@@ -289,7 +289,7 @@ class TestShotgunApi(base.LiveTestBase):
 
         
         s = self.sg._get_connection()
-        resp = s.request("GET", version_with_thumbnail.get('image').replace('http', 'https')) # TODO remove the replace
+        resp = s.request("GET", version_with_thumbnail.get('image').replace('http://', 'https://')) # TODO remove the replace
         content = resp.content
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.headers['content-type'], 'image/jpeg')
@@ -321,7 +321,7 @@ class TestShotgunApi(base.LiveTestBase):
         self.assertEqual(task_with_thumbnail.get('id'), self.task['id'])
 
         s = self.sg._get_connection()
-        resp = s.request("GET", task_with_thumbnail.get('image').replace('http', 'https')) # TODO remove the replace
+        resp = s.request("GET", task_with_thumbnail.get('image').replace('http://', 'https://')) # TODO remove the replace
         content = resp.content
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.headers['content-type'], 'image/jpeg')
@@ -365,7 +365,7 @@ class TestShotgunApi(base.LiveTestBase):
             self.assertEqual(response_version_with_project[0].get('code'), 'Sg unittest version')
 
             s = self.sg._get_connection()
-            resp = s.request("GET", response_version_with_project[0].get('project.Project.image').replace('http', 'https')) # TODO remove the replace
+            resp = s.request("GET", response_version_with_project[0].get('project.Project.image').replace('http://', 'https://')) # TODO remove the replace
             content = resp.content
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.headers['content-type'], 'image/jpeg')
@@ -1594,7 +1594,7 @@ class TestErrors(base.TestBase):
         sg = shotgun_api3.Shotgun(server_url, login=login, password='not a real password')
         self.assertRaises(shotgun_api3.AuthenticationFault, sg.find_one, 'Shot',[])
 
-    @patch('requests.Session.request')
+    @patch('shotgun_api3.lib.requests.Session.request')
     def test_status_not_200(self, mock_request):
         response = MagicMock(name="response mock", spec=dict)
         response.status_code = 300
@@ -1604,7 +1604,7 @@ class TestErrors(base.TestBase):
         mock_request.return_value = response
         self.assertRaises(shotgun_api3.ProtocolError, self.sg.find_one, 'Shot', [])
 
-    @patch('requests.Session.request')
+    @patch('shotgun_api3.lib.requests.Session.request')
     def test_sha2_error(self, mock_request):
         # Simulate the SSLHandshakeError raised with SHA-2 errors
         #mock_request.side_effect = SSLHandshakeError("[Errno 1] _ssl.c:480: error:0D0C50A1:asn1 "
@@ -1645,7 +1645,7 @@ class TestErrors(base.TestBase):
         if original_env_val is not None:
             os.environ["SHOTGUN_FORCE_CERTIFICATE_VALIDATION"] = original_env_val
 
-    @patch('requests.Session.request')
+    @patch('shotgun_api3.lib.requests.Session.request')
     def test_sha2_error_with_strict(self, mock_request):
         # Simulate the SSLHandshakeError raised with SHA-2 errors
         #mock_request.side_effect = SSLHandshakeError("[Errno 1] _ssl.c:480: error:0D0C50A1:asn1 "
@@ -1677,7 +1677,7 @@ class TestErrors(base.TestBase):
         if original_env_val is not None:
             os.environ["SHOTGUN_FORCE_CERTIFICATE_VALIDATION"] = original_env_val
 
-    @patch('requests.Session.post')
+    @patch('shotgun_api3.lib.requests.Session.post')
     def test_sanitized_auth_params(self, mock_open):
         # Simulate the server blowing up and giving us a 500 error
         
@@ -1840,7 +1840,7 @@ class TestHumanUserAuth(base.HumanUserAuthLiveTestBase):
 
 
         s = self.sg._get_connection()
-        resp = s.request("GET", version_with_thumbnail.get('image').replace('http', 'https')) # TODO remove the replace
+        resp = s.request("GET", version_with_thumbnail.get('image').replace('http://', 'https://')) # TODO remove the replace
         content = resp.content
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.headers['content-type'], 'image/jpeg')
@@ -1904,7 +1904,7 @@ class TestSessionTokenAuth(base.SessionTokenAuthLiveTestBase):
 
 
             s = self.sg._get_connection()
-            resp = s.request("GET", version_with_thumbnail.get('image').replace('http', 'https')) # TODO remove the replace
+            resp = s.request("GET", version_with_thumbnail.get('image').replace('http://', 'https://')) # TODO remove the replace
             content = resp.content
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.headers['content-type'], 'image/jpeg')

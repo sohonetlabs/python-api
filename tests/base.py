@@ -2,7 +2,7 @@
 import os
 import re
 import sys
-import six
+from shotgun_api3.lib import six
 import unittest
 try:
     from ConfigParser import ConfigParser
@@ -11,7 +11,7 @@ except ImportError: # Python3
 
 
 from . import mock
-import requests
+from shotgun_api3.lib import requests
 
 import shotgun_api3 as api
 from shotgun_api3.shotgun import json

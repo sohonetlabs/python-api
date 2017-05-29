@@ -60,9 +60,10 @@ import json
 import time
 import types
 import urllib
-import requests
+
 import traceback
-import six
+from .lib import requests
+from .lib import six
 
 try:
     import urlparse
@@ -2430,7 +2431,6 @@ class Shotgun(object):
    
         try:
             conn = self._get_connection()
-            print(url.replace('http://', 'https://'))
             headers = {'user-agent': "; ".join(self._user_agents)}
             r =  conn.get(url.replace('http://', 'https://'), stream=True, headers=headers) # TODO remove replace
             if file_path:
@@ -3729,12 +3729,8 @@ class Shotgun(object):
                     files[key] = v
                 else:
                     _params[key] = v
-            print(url, _params, files)
             resp = conn.post(url, data = _params, files=files)
             result = resp.text
-            print(dir(resp))
-            print(resp)
-            print(result)
             # response headers are in str(resp.info()).splitlines()
         except Exception as e:
             raise ShotgunError("Unanticipated error occurred %s" % (e))
