@@ -158,9 +158,10 @@ class TestShotgunApi(base.LiveTestBase):
         attach_id = self.sg.upload("Ticket",
             self.ticket['id'], path, 'attachments',
             tag_list="monkeys, everywhere, send, help")
-
+        
         # test download with attachment_id
         attach_file = self.sg.download_attachment(attach_id)
+        
         self.assertTrue(attach_file is not None)
         self.assertEqual(size, len(attach_file))
         orig_file = open(path, "rb").read()

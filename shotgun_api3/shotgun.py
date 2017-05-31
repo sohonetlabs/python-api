@@ -567,6 +567,36 @@ class Shotgun(object):
             auth = base64.encodestring(urlparse.unquote(auth).encode()).decode()
             self.config.authorization = "Basic " + auth.strip()
         
+        # foo:bar@123.456.789.012:3456
+        if http_proxy:
+            # check if we're using authentication. Start from the end since there might be
+            # @ in the user's password.
+            p = http_proxy.rsplit("@", 1)
+            if len(p) > 1:
+                self.config.proxy_user, self.config.proxy_pass = \
+                    p[0].split(":", 1)
+                proxy_server = p[1]
+            else:
+                proxy_server = http_proxy
+            proxy_netloc_list = proxy_server.split(":")
+            self.config.proxy_server = ":".join(proxy_netloc_list[:-1])
+            if len(proxy_netloc_list) > 1:
+                try:
+                    self.config.proxy_port = int(proxy_netloc_list[-1])
+                except ValueError:
+                    self.config.proxy_server = proxy_server
+                    #raise ValueError("Invalid http_proxy address '%s'. Valid " \
+                    #    "format is '123.456.789.012' or '123.456.789.012:3456'"\
+                    #    ". If no port is specified, a default of %d will be "\
+                    #    "used." % (http_proxy, self.config.proxy_port))
+
+            # now populate self.config.proxy_handler
+            #if self.config.proxy_user and self.config.proxy_pass:
+            #    auth_string = "%s:%s@" % (self.config.proxy_user, self.config.proxy_pass)
+            #else:
+            #    auth_string = ""
+            #self.config.proxy_addr = "http://%s%s:%d" % (auth_string, self.config.proxy_server, self.config.proxy_port)
+        
         if ensure_ascii:
             self._json_loads = self._json_loads_ascii
 
@@ -3430,18 +3460,22 @@ class Shotgun(object):
             return self._connection
         
         self._connection = requests.Session()
-        return self._connection
+        
 
         if self.config.proxy_server:
-            pi = ProxyInfo(socks.PROXY_TYPE_HTTP, self.config.proxy_server,
-                 self.config.proxy_port, proxy_user=self.config.proxy_user,
-                 proxy_pass=self.config.proxy_pass)
-            self._connection = Http(timeout=self.config.timeout_secs, ca_certs=self.__ca_certs,
-                proxy_info=pi, disable_ssl_certificate_validation=self.config.no_ssl_validation)
-        else:
-            self._connection = Http(timeout=self.config.timeout_secs, ca_certs=self.__ca_certs,
-                proxy_info=None, disable_ssl_certificate_validation=self.config.no_ssl_validation)
-
+            #pi = ProxyInfo(socks.PROXY_TYPE_HTTP, self.config.proxy_server,
+            #     self.config.proxy_port, proxy_user=self.config.proxy_user,
+            #     proxy_pass=self.config.proxy_pass)
+            #self._connection = Http(timeout=self.config.timeout_secs, ca_certs=self.__ca_certs,
+            #    proxy_info=pi, disable_ssl_certificate_validation=self.config.no_ssl_validation)
+            url = self.config.proxy_server
+            if self.config.proxy_port is not None:
+                url += ':' + str(self.config.proxy_port)
+            if self.config.proxy_user and self.config.proxy_pass:
+                url = '%s:%s@%s'%(self.config.proxy_user, self.config.proxy_pass, url)
+                
+            self._connection.proxies[self.config.scheme] = url
+        
         return self._connection
 
     def _close_connection(self):

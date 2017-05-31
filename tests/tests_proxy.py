@@ -1,6 +1,6 @@
 #! /opt/local/bin/python
 import sys
-import base
+from . import base
 import shotgun_api3 as api
 
 
@@ -19,11 +19,11 @@ class ServerConnectionTest(base.TestBase):
         self.sg.connect()
         if self.config.http_proxy:
             sys.stderr.write("[WITH PROXY] ")
-            self.assertTrue(isinstance(self.sg._connection.proxy_info, 
+            self.assertTrue(isinstance(self.sg._connection.proxies, 
                                         api.lib.httplib2.ProxyInfo))
         else:
             sys.stderr.write("[NO PROXY] ")
-            self.assertEqual(self.sg._connection.proxy_info, None)
+            self.assertEqual(self.sg._connection.proxies, {})
 
 
 
