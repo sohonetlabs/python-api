@@ -2994,9 +2994,11 @@ class Shotgun(object):
         Build urllib2 opener with appropriate proxy handler.
         """
         if self.config.proxy_handler:
-            opener = urllib2.build_opener(self.config.proxy_handler, handler)
+            opener = urllib.request.build_opener(
+                self.config.proxy_handler, handler
+            )
         else:
-            opener = urllib2.build_opener(handler)
+            opener = urllib.request.build_opener(handler)
         return opener
 
     def _turn_off_ssl_validation(self):
@@ -3695,15 +3697,15 @@ class Shotgun(object):
         :rtype: str
         """
         try:
-            opener = urllib2.build_opener(urllib2.HTTPHandler)
+            opener = urllib.request.build_opener(urllib.request.HTTPHandler)
 
-            request = urllib2.Request(storage_url, data=data)
+            request = urllib.request.Request(storage_url, data=data)
             request.add_header("Content-Type", content_type)
             request.add_header("Content-Length", size)
             request.get_method = lambda: "PUT"
             result = opener.open(request)
             etag = result.info().getheader("ETag")
-        except urllib2.HTTPError as e:
+        except urllib.error.HTTPError as e:
             if e.code == 500:
                 raise ShotgunError("Server encountered an internal error.\n%s\n%s\n\n" % (storage_url, e))
             else:
