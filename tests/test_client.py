@@ -5,6 +5,7 @@ need a live server to run against."""
 import base64
 import datetime
 import re
+from shotgun_api3.lib import six
 try:
     import simplejson as json
 except ImportError:
@@ -13,16 +14,17 @@ except ImportError:
     except ImportError:
         import shotgun_api3.lib.simplejson as json
 
+from shotgun_api3.lib import requests
 import platform
 import sys
 import time
 import unittest
-import mock
+from . import mock
 
-import shotgun_api3.lib.httplib2 as httplib2
+#import shotgun_api3.lib.httplib2 as httplib2
 import shotgun_api3 as api
 from shotgun_api3.shotgun import ServerCapabilities, SG_TIMEZONE
-import base
+from . import base
 
 class TestShotgunClient(base.MockTestBase):
     '''Test case for shotgun api with server interactions mocked.'''
@@ -152,7 +154,7 @@ class TestShotgunClient(base.MockTestBase):
         # login:password@domain
         auth_url = "%s%s@%s" % (self.uri_prefix, login_password, self.domain)
         sg = api.Shotgun(auth_url, None, None, connect=False)
-        expected = "Basic " + base64.encodestring(login_password).strip()
+        expected = "Basic " + base64.encodestring(login_password.encode()).decode().strip()
         self.assertEqual(expected, sg.config.authorization)
 
     def test_authorization(self):
@@ -172,7 +174,7 @@ class TestShotgunClient(base.MockTestBase):
         args, _ = self.sg._http_request.call_args
         verb, path, body, headers = args
 
-        expected = "Basic " + base64.encodestring(login_password).strip()
+        expected = "Basic " + base64.encodestring(login_password.encode()).decode().strip()
         self.assertEqual(expected, headers.get("Authorization"))
 
     def test_user_agent(self):
@@ -232,9 +234,9 @@ class TestShotgunClient(base.MockTestBase):
 
     def test_network_retry(self):
         """Network failure is retried"""
-        self.sg._http_request.side_effect = httplib2.HttpLib2Error
+        self.sg._http_request.side_effect = requests.ConnectionError
 
-        self.assertRaises(httplib2.HttpLib2Error, self.sg.info)
+        self.assertRaises(requests.ConnectionError, self.sg.info)
         self.assertTrue(
             self.sg.config.max_rpc_attempts ==self.sg._http_request.call_count,
             "Call is repeated")
@@ -260,7 +262,7 @@ class TestShotgunClient(base.MockTestBase):
 
         try:
             self.sg.info()
-        except api.Fault, e:
+        except api.Fault as e:
             self.assertEqual("Go BANG", str(e))
 
     def test_call_rpc(self):
@@ -298,7 +300,10 @@ class TestShotgunClient(base.MockTestBase):
 
         # Test unicode mixed with utf-8 as reported in Ticket #17959
         d = { "results" : ["foo", "bar"] }
-        a = { "utf_str": "\xe2\x88\x9a", "unicode_str": "\xe2\x88\x9a".decode("utf-8") }
+        if sys.version_info[0] < 3:
+            a = { "utf_str": "\xe2\x88\x9a", "unicode_str": "\xe2\x88\x9a".decode("utf-8") }
+        else:
+            a = { "utf_str": "\xe2\x88\x9a", "unicode_str": "\xe2\x88\x9a" }
         self._mock_http(d)
         rv = self.sg._call_rpc("list", a)
         expected = "rpc response with list result"
@@ -330,14 +335,14 @@ class TestShotgunClient(base.MockTestBase):
             return datetime.datetime(*time.strptime(s, f)[:6])
 
         def assert_wire(wire, match):
-            self.assertTrue(isinstance(wire["date"], basestring))
+            self.assertTrue(isinstance(wire["date"], six.string_types))
             d = _datetime(wire["date"], "%Y-%m-%d").date()
             d = wire['date']
             self.assertEqual(match["date"], d)
-            self.assertTrue(isinstance(wire["datetime"], basestring))
+            self.assertTrue(isinstance(wire["datetime"], six.string_types))
             d = _datetime(wire["datetime"], "%Y-%m-%dT%H:%M:%SZ")
             self.assertEqual(match["datetime"], d)
-            self.assertTrue(isinstance(wire["time"], basestring))
+            self.assertTrue(isinstance(wire["time"], six.string_types))
             d = _datetime(wire["time"], "%Y-%m-%dT%H:%M:%SZ")
             self.assertEqual(match["time"], d.time())
 
@@ -377,7 +382,10 @@ class TestShotgunClient(base.MockTestBase):
         self.assertTrue(isinstance(j, str))
 
     def test_decode_response_ascii(self):
-        self._assert_decode_resonse(True, u"my data \u00E0".encode('utf8'))
+        if sys.version_info[0] < 3:
+            self._assert_decode_resonse(True, u"my data \u00E0".encode('utf8'))
+        else:
+            self._assert_decode_resonse(True, u"my data \u00E0")
 
     def test_decode_response_unicode(self):
         self._assert_decode_resonse(False, u"my data \u00E0")
@@ -397,8 +405,10 @@ class TestShotgunClient(base.MockTestBase):
                          http_proxy=self.config.http_proxy,
                          ensure_ascii = ensure_ascii,
                          connect=False)
-
-        j = json.dumps(d, ensure_ascii=ensure_ascii, encoding="utf-8")
+        if sys.version_info[0] < 3:
+            j = json.dumps(d, ensure_ascii=ensure_ascii, encoding="utf-8")
+        else:
+            j = json.dumps(d, ensure_ascii=ensure_ascii)
         self.assertEqual(d, sg._decode_response(headers, j))
 
         headers["content-type"] = "text/javascript"

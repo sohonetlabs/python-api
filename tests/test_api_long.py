@@ -20,11 +20,11 @@ class TestShotgunApiLong(base.LiveTestBase):
             if entity_type in ("Asset", "Task", "Shot", "Attachment",
                                "Candidate"):
                 continue
-            print "Finding entity type", entity_type
+            print("Finding entity type", entity_type)
 
             fields = self.sg.schema_field_read(entity_type)
             if not fields:
-                print "No fields for %s skipping" % (entity_type,)
+                print("No fields for %s skipping" % (entity_type,))
                 continue
 
             # trying to use some different code paths to the other find test

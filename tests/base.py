@@ -1,11 +1,17 @@
 """Base class for Shotgun API tests."""
 import os
 import re
+import sys
+from shotgun_api3.lib import six
 import unittest
-from ConfigParser import ConfigParser
+try:
+    from ConfigParser import ConfigParser
+except ImportError: # Python3
+    from configparser import ConfigParser
 
 
-import mock
+from . import mock
+from shotgun_api3.lib import requests
 
 import shotgun_api3 as api
 from shotgun_api3.shotgun import json
@@ -103,7 +109,7 @@ class MockTestBase(TestBase):
         #also replace the function that is called to get the http connection
         #to avoid calling the server. OK to return a mock as we will not use
         #it
-        self.mock_conn = mock.Mock(spec=api.lib.httplib2.Http)
+        self.mock_conn = mock.Mock(spec=requests.Session)#api.lib.httplib2.Http)
         #The Http objects connection property is a dict of connections
         #it is holding
         self.mock_conn.connections = dict()
@@ -125,8 +131,11 @@ class MockTestBase(TestBase):
         if not isinstance(self.sg._http_request, mock.Mock):
             return
 
-        if not isinstance(data, basestring):
-            data = json.dumps(data, ensure_ascii=False, encoding="utf-8")
+        if not isinstance(data, six.string_types):
+            if sys.version_info[0] < 3:
+                data = json.dumps(data, ensure_ascii=False, encoding="utf-8")
+            else:
+                data = json.dumps(data, ensure_ascii=False)
 
         resp_headers = { 'cache-control': 'no-cache',
                          'connection': 'close',
@@ -149,7 +158,7 @@ class MockTestBase(TestBase):
         """Asserts _http_request is called with the method and params."""
         args, _ = self.sg._http_request.call_args
         arg_body = args[2]
-        assert isinstance(arg_body, basestring)
+        assert isinstance(arg_body, six.string_types)
         arg_body = json.loads(arg_body)
 
         arg_params = arg_body.get("params")
@@ -335,7 +344,7 @@ def _find_or_create_entity(sg, entity_type, data, identifyiers=None):
     @returns dicitonary of the entity values
     '''
     identifyiers = identifyiers or ['name']
-    fields = data.keys()
+    fields = list(data.keys())
     filters = [[key, 'is', data[key]] for key in identifyiers]
     entity = sg.find_one(entity_type, filters, fields=fields)
     entity = entity or sg.create(entity_type, data, return_fields=fields)
