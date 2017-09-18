@@ -3704,7 +3704,7 @@ class Shotgun(object):
             request.add_header("Content-Length", size)
             request.get_method = lambda: "PUT"
             result = opener.open(request)
-            etag = result.info().getheader("ETag")
+            etag = result.getheader("ETag")
         except urllib.error.HTTPError as e:
             if e.code == 500:
                 raise ShotgunError("Server encountered an internal error.\n%s\n%s\n\n" % (storage_url, e))
