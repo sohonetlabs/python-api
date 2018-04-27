@@ -7,12 +7,11 @@ The latest version can always be found at http://github.com/shotgunsoftware/pyth
 ## Minimum Requirements
 
 * Shotgun server v2.4.12+.
-* Python v2.4 - v2.7.
+* Python v2.6 - v2.7.
 
 ## High Performance Requirements
 
-* For Python 2.4 and 2.5, install [simplejson 2.0.9](http://pypi.python.org/pypi/simplejson/2.0.9)
-* For Python 2.6 and higher, install [simplejson 2.1.6](http://pypi.python.org/pypi/simplejson/2.1.6)
+* Install [simplejson 2.1.6](http://pypi.python.org/pypi/simplejson/2.1.6)
 
 ## Documentation
 Tutorials and detailed documentation about the Python API are available at http://developer.shotgunsoftware.com/python-api). 
@@ -33,7 +32,8 @@ You can see the [full history of the Python API on the documentation site](http:
 
 Integration and unit tests are provided. 
 
-[![Build Status](https://secure.travis-ci.org/shotgunsoftware/python-api.png?branch=master)](http://travis-ci.org/shotgunsoftware/python-api)
+[![Build Status](https://secure.travis-ci.org/shotgunsoftware/python-api.svg?branch=master)](http://travis-ci.org/shotgunsoftware/python-api)
+
 
 - All tests require the [nose unit testing tools](http://nose.readthedocs.org), and a `tests/config` file (you can copy an example from `tests/example_config`).
 - Tests can be run individually like this: `nosetest tests/test_client.py`

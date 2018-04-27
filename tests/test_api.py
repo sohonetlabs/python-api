@@ -158,10 +158,10 @@ class TestShotgunApi(base.LiveTestBase):
         attach_id = self.sg.upload("Ticket",
             self.ticket['id'], path, 'attachments',
             tag_list="monkeys, everywhere, send, help")
-        
+
         # test download with attachment_id
         attach_file = self.sg.download_attachment(attach_id)
-        
+
         self.assertTrue(attach_file is not None)
         self.assertEqual(size, len(attach_file))
         orig_file = open(path, "rb").read()
@@ -188,13 +188,21 @@ class TestShotgunApi(base.LiveTestBase):
         # test download with attachment hash
         ticket = self.sg.find_one('Ticket', [['id', 'is', self.ticket['id']]],
                                   ['attachments'])
-        attach_file = self.sg.download_attachment(ticket['attachments'][0])
+
+        # Look for the attachment we just uploaded, the attachments are not returned from latest
+        # to earliest.
+        attachment = [x for x in ticket["attachments"] if x["id"] == attach_id]
+        self.assertEqual(len(attachment), 1)
+
+        attachment = attachment[0]
+        attach_file = self.sg.download_attachment(attachment)
+
         self.assertTrue(attach_file is not None)
         self.assertEqual(size, len(attach_file))
         self.assertEqual(orig_file, attach_file)
 
         # test download with attachment hash (write to disk)
-        result = self.sg.download_attachment(ticket['attachments'][0],
+        result = self.sg.download_attachment(attachment,
                                              file_path=file_path)
         self.assertEqual(result, file_path)
         fp = open(file_path, 'rb')
@@ -239,7 +247,7 @@ class TestShotgunApi(base.LiveTestBase):
         self.assertEqual(new_version.get('type'), 'Version')
         self.assertEqual(new_version.get('project'), self.project)
         self.assertTrue(new_version.get('image') is not None)
- 
+
         s = self.sg._get_connection()
         resp = s.request("GET", new_version.get('image').replace('http://', 'https://')) # TODO remove the replace
         content = resp.content
@@ -259,11 +267,9 @@ class TestShotgunApi(base.LiveTestBase):
         self.assertEqual(new_version.get('project'), self.project)
         self.assertTrue(new_version.get('filmstrip_image') is not None)
 
-        s = self.sg._get_connection()
-        resp = s.request("GET", new_version.get('filmstrip_image').replace('http://', 'https://')) # TODO remove the replace
-        content = resp.content
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.headers['content-type'], 'image/jpeg')
+        url = new_version.get('filmstrip_image')
+        data = self.sg.download_attachment({'url': url})
+        self.assertTrue(isinstance(data, str))
 
         self.sg.delete("Version", new_version['id'])
     # end test_upload_thumbnail_in_create
@@ -288,7 +294,7 @@ class TestShotgunApi(base.LiveTestBase):
         self.assertEqual(version_with_thumbnail.get('type'), 'Version')
         self.assertEqual(version_with_thumbnail.get('id'), self.version['id'])
 
-        
+
         s = self.sg._get_connection()
         resp = s.request("GET", version_with_thumbnail.get('image').replace('http://', 'https://')) # TODO remove the replace
         content = resp.content
@@ -1543,18 +1549,18 @@ class TestFollow(base.LiveTestBase):
             [["id","is",self.task["id"]]],
             ["project.Project.id"])["project.Project.id"]
         project_count = 2 if shot_project_id == task_project_id else 1
-        result = self.sg.following(self.human_user, 
+        result = self.sg.following(self.human_user,
             project={"type":"Project", "id":shot_project_id})
         self.assertEqual( project_count, len(result) )
-        result = self.sg.following(self.human_user, 
+        result = self.sg.following(self.human_user,
             project={"type":"Project", "id":task_project_id})
         self.assertEqual( project_count, len(result) )
-        result = self.sg.following(self.human_user, 
-            project={"type":"Project", "id":shot_project_id}, 
+        result = self.sg.following(self.human_user,
+            project={"type":"Project", "id":shot_project_id},
             entity_type="Shot")
         self.assertEqual( 1, len(result) )
-        result = self.sg.following(self.human_user, 
-            project={"type":"Project", "id":task_project_id}, 
+        result = self.sg.following(self.human_user,
+            project={"type":"Project", "id":task_project_id},
             entity_type="Task")
         self.assertEqual( 1, len(result) )
 
@@ -1681,7 +1687,7 @@ class TestErrors(base.TestBase):
     @patch('shotgun_api3.lib.requests.Session.post')
     def test_sanitized_auth_params(self, mock_open):
         # Simulate the server blowing up and giving us a 500 error
-        
+
         response = requests.Response()
         response.status_code = 500
         response._content = b'message'
@@ -1712,7 +1718,7 @@ class TestErrors(base.TestBase):
         path = os.path.abspath(os.path.expanduser(os.path.join(this_dir,"empty.txt")))
         self.assertRaises(shotgun_api3.ShotgunError, self.sg.upload, 'Version', 123, path)
         self.assertRaises(shotgun_api3.ShotgunError, self.sg.upload_thumbnail, 'Version', 123, path)
-        self.assertRaises(shotgun_api3.ShotgunError, self.sg.upload_filmstrip_thumbnail, 'Version', 
+        self.assertRaises(shotgun_api3.ShotgunError, self.sg.upload_filmstrip_thumbnail, 'Version',
                           123, path)
 
     def test_upload_missing_file(self):
@@ -1722,7 +1728,7 @@ class TestErrors(base.TestBase):
         path = "/path/to/nowhere/foo.txt"
         self.assertRaises(shotgun_api3.ShotgunError, self.sg.upload, 'Version', 123, path)
         self.assertRaises(shotgun_api3.ShotgunError, self.sg.upload_thumbnail, 'Version', 123, path)
-        self.assertRaises(shotgun_api3.ShotgunError, self.sg.upload_filmstrip_thumbnail, 'Version', 
+        self.assertRaises(shotgun_api3.ShotgunError, self.sg.upload_filmstrip_thumbnail, 'Version',
                           123, path)
 
 #    def test_malformed_response(self):
@@ -2539,7 +2545,7 @@ def _has_unicode(data):
 
 def _get_path(url):
     """Returns path component of a url without the sheme, host, query, anchor, or any other
-    additional elements. 
+    additional elements.
     For example, the url "https://foo.shotgunstudio.com/page/2128#Shot_1190_sr10101_034"
     returns "/page/2128"
     """

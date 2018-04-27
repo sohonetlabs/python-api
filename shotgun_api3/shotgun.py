@@ -126,7 +126,7 @@ except ImportError as e:
 
 # ----------------------------------------------------------------------------
 # Version
-__version__ = "3.0.33.dev"
+__version__ = "3.0.35"
 
 # ----------------------------------------------------------------------------
 # Errors
@@ -159,6 +159,13 @@ class MissingTwoFactorAuthenticationFault(Fault):
     """
     Exception when the server side reports an error related to missing two-factor authentication
     credentials.
+    """
+    pass
+
+class UserCredentialsNotAllowedForSSOAuthenticationFault(Fault):
+    """
+    Exception when the server is configured to use SSO. It is not possible to use
+    a username/password pair to authenticate on such server.
     """
     pass
 
@@ -280,6 +287,24 @@ class ServerCapabilities(object):
             'version': (7, 0, 12),
             'label': 'user_following parameter'
         }, True)
+
+    def ensure_paging_info_without_counts_support(self):
+        """
+        Ensures server has support for optimized pagination, added in v7.4.0.
+        """
+        return self._ensure_support({
+            'version': (7, 4, 0),
+            'label': 'optimized pagination'
+        }, False)
+
+    def ensure_return_image_urls_support(self):
+        """
+        Ensures server has support for returning thumbnail URLs without additional round-trips, added in v3.3.0.
+        """
+        return self._ensure_support({
+            'version': (3, 3, 0),
+            'label': 'return thumbnail URLs'
+        }, False)
 
     def __str__(self):
         return "ServerCapabilities: host %s, version %s, is_dev %s"\
@@ -608,6 +633,17 @@ class Shotgun(object):
         if connect:
             self.server_caps
 
+        # Check for api_max_entities_per_page in the server info and change the record per page value if it is supplied.
+        self.config.records_per_page = self.server_info.get('api_max_entities_per_page') or self.config.records_per_page
+
+        # When using auth_token in a 2FA scenario we need to switch to session-based
+        # authentication because the auth token will no longer be valid after a first use.
+        if self.config.auth_token is not None:
+            self.config.session_token = self.get_session_token()
+            self.config.user_login = None
+            self.config.user_password = None
+            self.config.auth_token = None
+
 
     # ========================================================================
     # API Functions
@@ -618,10 +654,12 @@ class Shotgun(object):
         Property containing server information.
 
         >>> sg.server_info
-        {'full_version': [6, 3, 15, 0],
-         's3_uploads_enabled': True,
-         's3_direct_uploads_enabled': True,
-         'version': [6, 3, 15]}
+        {'full_version': [6, 3, 15, 0], 'version': [6, 3, 15], ...}
+
+        .. note::
+
+            Beyond ``full_version`` and ``version`` which differ by the inclusion of the bugfix number, you should expect
+            these values to be unsupported and for internal use only.
 
         :returns: dict of server information from :class:`ServerCapabilities` object
         :rtype: dict
@@ -671,7 +709,12 @@ class Shotgun(object):
         Get API-related metadata from the Shotgun server.
 
         >>> sg.info()
-        {'s3_uploads_enabled': True, 'full_version': [6, 3, 15, 0], 'version': [6, 3, 15]}
+        {'full_version': [6, 3, 15, 0], 'version': [6, 3, 15], ...}
+
+        .. note::
+
+            Beyond ``full_version`` and ``version`` which differ by the inclusion of the bugfix number, you should expect
+            these values to be unsupported and for internal use only.
 
         :returns: dict of the server metadata.
         :rtype: dict
@@ -799,7 +842,7 @@ class Shotgun(object):
             returns all entities that match.
         :param int page: Optional page of results to return. Use this together with the ``limit``
             parameter to control how your query results are paged. Defaults to ``0`` which returns
-            the first page of results.
+            all entities that match.
         :param bool retired_only: Optional boolean when ``True`` will return only entities that have
             been retried. Defaults to ``False`` which returns only entities which have not been
             retired. There is no option to return both retired and non-retired entities in the
@@ -850,6 +893,16 @@ class Shotgun(object):
                                                  include_archived_projects,
                                                  additional_filter_presets)
 
+        if self.server_caps.ensure_return_image_urls_support():
+            params['api_return_image_urls'] = True
+
+        if self.server_caps.ensure_paging_info_without_counts_support():
+            paging_info_param = "return_paging_info_without_counts"
+        else:
+            paging_info_param = "return_paging_info"
+
+        params[paging_info_param] = False
+
         if limit and limit <= self.config.records_per_page:
             params["paging"]["entities_per_page"] = limit
             # If page isn't set and the limit doesn't require pagination,
@@ -857,30 +910,40 @@ class Shotgun(object):
             if page == 0:
                 page = 1
 
-        if self.server_caps.version and self.server_caps.version >= (3, 3, 0):
-            params['api_return_image_urls'] = True
-
         # if page is specified, then only return the page of records requested
         if page != 0:
-            # No paging_info needed, so optimize it out.
-            params["return_paging_info"] = False
             params["paging"]["current_page"] = page
             records = self._call_rpc("read", params).get("entities", [])
             return self._parse_records(records)
 
+        params[paging_info_param] = True
         records = []
-        result = self._call_rpc("read", params)
-        while result.get("entities"):
-            records.extend(result.get("entities"))
 
-            if limit and len(records) >= limit:
-                records = records[:limit]
-                break
-            if len(records) == result["paging_info"]["entity_count"]:
-                break
+        if self.server_caps.ensure_paging_info_without_counts_support():
+            has_next_page = True
+            while has_next_page:
+                result = self._call_rpc("read", params)
+                records.extend(result.get("entities"))
 
-            params['paging']['current_page'] += 1
+                if limit and len(records) >= limit:
+                    records = records[:limit]
+                    break
+
+                has_next_page = result["paging_info"]["has_next_page"]
+                params['paging']['current_page'] += 1
+        else:
             result = self._call_rpc("read", params)
+            while result.get("entities"):
+                records.extend(result.get("entities"))
+
+                if limit and len(records) >= limit:
+                    records = records[:limit]
+                    break
+                if len(records) == result["paging_info"]["entity_count"]:
+                    break
+
+                params['paging']['current_page'] += 1
+                result = self._call_rpc("read", params)
 
         return self._parse_records(records)
 
@@ -899,7 +962,6 @@ class Shotgun(object):
         params["return_fields"] = fields or ["id"]
         params["filters"] = filters
         params["return_only"] = (retired_only and 'retired') or "active"
-        params["return_paging_info"] = True
         params["paging"] = { "entities_per_page": self.config.records_per_page,
                              "current_page": 1 }
 
@@ -2917,9 +2979,8 @@ class Shotgun(object):
             arguments, and argument types may change at any point.
 
         """
-        return self._call_rpc(
-            "nav_expand",
-            {
+        return self._call_rpc(_expand",{
+
                 "path":path,
                 "seed_entity_field": seed_entity_field,
                 "entity_fields": entity_fields
@@ -3339,11 +3400,17 @@ class Shotgun(object):
         """
         ERR_AUTH = 102 # error code for authentication related problems
         ERR_2FA  = 106 # error code when 2FA authentication is required but no 2FA token provided.
+        ERR_SSO  = 108 # error code when SSO is activated on the site, preventing the use of username/password for authentication.
+
         if isinstance(sg_response, dict) and sg_response.get("exception"):
             if sg_response.get("error_code") == ERR_AUTH:
                 raise AuthenticationFault(sg_response.get("message", "Unknown Authentication Error"))
             elif sg_response.get("error_code") == ERR_2FA:
                 raise MissingTwoFactorAuthenticationFault(sg_response.get("message", "Unknown 2FA Authentication Error"))
+            elif sg_response.get("error_code") == ERR_SSO:
+                raise UserCredentialsNotAllowedForSSOAuthenticationFault(
+                    sg_response.get("message", "Authentication using username/password is not allowed for an SSO-enabled Shotgun site")
+                )
             else:
                 # raise general Fault
                 raise Fault(sg_response.get("message", "Unknown Error"))
@@ -3611,15 +3678,15 @@ class Shotgun(object):
         filename = os.path.basename(path)
 
         fd = open(path, "rb")
-        try:
+        try:22
             content_type = mimetypes.guess_type(filename)[0]
-            content_type = content_type or "application/octet-stream"
+            content_type = c2ype or "application/octet-stream"
             file_size = os.fstat(fd.fileno())[stat.ST_SIZE]
             self._upload_data_to_storage(fd, content_type, file_size, storage_url )
         finally:
             fd.close()
-
-        LOG.debug("File uploaded to Cloud storage: %s", filename)
+..info()
+        LOG.debug("Fi2laded to Cloud storage: %s", filename)
 
     def _multipart_upload_file_to_storage(self, path, upload_info):
         """
@@ -3751,6 +3818,7 @@ class Shotgun(object):
 
         params.update(self._auth_params())
 
+        opener = self._build_opener(FormPostHandler)
 
         # Perform the request
 
