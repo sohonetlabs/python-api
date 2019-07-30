@@ -1,3 +1,6 @@
+
+# DO NOT USE< SHOTGUN API NOW HAS PYTHON3 SUPPORT
+
 # Shotgun Python API
 
 Shotgun provides a simple Python-based API for accessing Shotgun and integrating with other tools. This is the official API that is maintained by Shotgun Software (support@shotgunsoftware.com)
